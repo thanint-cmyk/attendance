@@ -266,8 +266,8 @@ if submitted:
     new_roster_sheet = roster_sheet_name_for_now(now2)
 
     if (new_roster_sheet != roster_sheet) or (new_session_en != session_en):
-    global LOG_WS_NAME, LOG_WS, cutoff_time, session_en, roster_sheet
-    pass  # failsafe: ensure block is not empty even if edits move code
+        global LOG_WS_NAME, LOG_WS, cutoff_time, session_en, roster_sheet
+        pass  # failsafe: ensure block is not empty even if edits move code
         try:
             ROSTER_BY_ID, ROSTER_BY_SEAT = load_roster_id_and_seat_from_gsheet(SHEET_ID, new_roster_sheet)
         except Exception as e:
