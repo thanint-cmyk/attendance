@@ -4,4 +4,5 @@ streamlit-webrtc==0.47.6
 opencv-contrib-python-headless==4.10.0.84
 numpy==2.0.1
 gspread==6.1.2
+streamlit-webrtc==0.47.6
 google-auth==2.33.0
