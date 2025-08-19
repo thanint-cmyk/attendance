@@ -1,0 +1,7 @@
+[project]
+name = "attendance-app"
+version = "0.0.0"
+
+[tool.uv]
+python-preference = "cpython"
+python = "3.11"
