@@ -1,24 +1,39 @@
+# attendance_streamlit.py  (fixed)
+
 import os, re
 from datetime import datetime, time
 
 import streamlit as st
-# Webcam via WebRTC (optional)
+
+# ---------- Optional Webcam via WebRTC ----------
 try:
     from streamlit_webrtc import webrtc_streamer, WebRtcMode
     HAS_WEBRTC = True
 except Exception:
     HAS_WEBRTC = False
+    webrtc_streamer = None
+    WebRtcMode = None
 
-
-# --- พยายามโหลด OpenCV; ถ้าไม่มีจะปิดฟีเจอร์สแกนแต่แอปยังทำงานได้ ---
+# ---------- Optional OpenCV ----------
 try:
     import cv2
     HAS_CV2 = True
 except Exception:
     HAS_CV2 = False
+    cv2 = None
 
-import gspread
-from google.oauth2.service_account import Credentials
+# ---------- Google Sheets (must-have for logging) ----------
+try:
+    import gspread
+    from google.oauth2.service_account import Credentials
+    HAS_GSPREAD = True
+except Exception:
+    HAS_GSPREAD = False
+    gspread = None
+    Credentials = None
+
+# ---------- Streamlit Page Config (call early) ----------
+st.set_page_config(page_title="QR/Barcode Attendance", page_icon="✅")
 
 # ------------------ Login ------------------
 def login_gate():
@@ -31,7 +46,7 @@ def login_gate():
         return True
 
     st.title("Login")
-    pwd = st.text_input("Password", type="password")
+    pwd = st.text_input("Password", type="password", placeholder="Enter app password")
     if st.button("Enter"):
         if pwd == pwd_cfg:
             st.session_state.authed = True
@@ -42,6 +57,16 @@ def login_gate():
 
 login_gate()
 
+# ---------- Hard dependency checks ----------
+if not HAS_GSPREAD:
+    st.error(
+        "ขาดไลบรารี Google Sheets (gspread / google-auth) ทำให้ใช้งานบันทึกข้อมูลไม่ได้\n"
+        "วิธีแก้: ใส่แพ็กเกจต่อไปนี้ใน requirements.txt แล้ว deploy ใหม่:\n"
+        "• gspread\n• google-auth\n\n"
+        "เสริม (กล้อง/บาร์โค้ด):\n• streamlit-webrtc (กล้อง)\n• opencv-contrib-python-headless (สแกน 1D/2D) หรือ opencv-python-headless (QR เท่านั้น)"
+    )
+    st.stop()
+
 # ------------------ Utils ------------------
 WEEKDAY_EN_TO_TH = {
     "Monday": "จันทร์", "Tuesday": "อังคาร", "Wednesday": "พุธ",
@@ -49,6 +74,7 @@ WEEKDAY_EN_TO_TH = {
 }
 
 def get_session_th_and_cutoff(now_t: time):
+    # cutoff เริ่มต้น: 9:10 (เช้า) / 13:10 (บ่าย)
     if now_t < time(12, 0, 0):
         return "เช้า", time(9, 10, 0)
     return "บ่าย", time(13, 10, 0)
@@ -76,6 +102,10 @@ def extract_student_id(raw_input: str):
 
 # ------------------ Google Sheets helpers ------------------
 def get_gspread_client_from_secrets(readonly=False):
+    if "GOOGLE_SERVICE_ACCOUNT" not in st.secrets:
+        raise KeyError(
+            "ไม่พบ secrets['GOOGLE_SERVICE_ACCOUNT'] กรุณาใส่ Service Account JSON ลงใน Secrets"
+        )
     sa_info = st.secrets["GOOGLE_SERVICE_ACCOUNT"]
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets.readonly" if readonly
@@ -92,7 +122,7 @@ def load_roster_id_and_seat_from_gsheet(sheet_id: str, worksheet_name: str):
     try:
         ws = sh.worksheet(worksheet_name)
     except gspread.exceptions.WorksheetNotFound:
-        raise FileNotFoundError(f"Google Sheet has no worksheet named '{worksheet_name}'")
+        raise FileNotFoundError(f"Google Sheet ไม่มี worksheet ชื่อ '{worksheet_name}'")
 
     values = ws.get_all_values()
     if not values:
@@ -102,18 +132,22 @@ def load_roster_id_and_seat_from_gsheet(sheet_id: str, worksheet_name: str):
     rows = values[1:]
 
     def idx_of(name):
-        try: return header.index(name)
-        except ValueError: return None
+        try:
+            return header.index(name)
+        except ValueError:
+            return None
 
     idx_sid, idx_name, idx_seat = idx_of("Student ID"), idx_of("Full Name"), idx_of("Seat")
     if None in (idx_sid, idx_name, idx_seat):
-        raise ValueError("Header must include: 'Student ID', 'Full Name', 'Seat'")
+        raise ValueError("แถวหัวตารางต้องมีคอลัมน์: 'Student ID', 'Full Name', 'Seat'")
 
     roster_by_id, roster_by_seat = {}, {}
     for r in rows:
-        if not r or idx_sid >= len(r): continue
+        if not r or idx_sid >= len(r):
+            continue
         sid = (r[idx_sid] or "").strip()
-        if not sid: continue
+        if not sid:
+            continue
         full_name = (r[idx_name] or "").strip() if idx_name < len(r) else ""
         seat = (r[idx_seat] or "").strip() if idx_seat < len(r) else ""
         roster_by_id[sid] = (full_name, seat)
@@ -131,7 +165,6 @@ def open_or_create_log_worksheet(sh: gspread.Spreadsheet, name: str) -> gspread.
     return ws
 
 # ------------------ Page & State ------------------
-st.set_page_config(page_title="QR/Barcode Attendance", page_icon="✅")
 st.title("QR/Barcode Attendance (Google Sheets)")
 
 now = datetime.now()
@@ -146,46 +179,63 @@ roster_sheet = roster_sheet_name_for_now(now)
 
 SHEET_ID = st.secrets.get("ROSTER_SHEET_ID", "").strip()
 if not SHEET_ID:
-    st.error("Missing ROSTER_SHEET_ID in Secrets.")
+    st.error("ไม่พบค่า ROSTER_SHEET_ID ใน Secrets")
     st.stop()
 
 # Load roster
 try:
     ROSTER_BY_ID, ROSTER_BY_SEAT = load_roster_id_and_seat_from_gsheet(SHEET_ID, roster_sheet)
 except Exception as e:
-    st.error(f"Failed to load roster '{roster_sheet}': {e}")
+    st.error(f"โหลด roster '{roster_sheet}' ไม่สำเร็จ: {e}")
     st.stop()
 
-gc_write = get_gspread_client_from_secrets(readonly=False)
-SH = gc_write.open_by_key(SHEET_ID)
+# Prepare write client & log sheet
+try:
+    gc_write = get_gspread_client_from_secrets(readonly=False)
+    SH = gc_write.open_by_key(SHEET_ID)
+except Exception as e:
+    st.error(f"เปิดไฟล์ Google Sheet ไม่สำเร็จ: {e}")
+    st.stop()
+
 today_str = now.strftime("%Y-%m-%d")
 LOG_WS_NAME = f"Log {today_str} {session_en}"
-LOG_WS = open_or_create_log_worksheet(SH, LOG_WS_NAME)
+try:
+    LOG_WS = open_or_create_log_worksheet(SH, LOG_WS_NAME)
+except Exception as e:
+    st.error(f"เปิด/สร้างชีท Log ไม่สำเร็จ: {e}")
+    st.stop()
 
 # preload duplicates
 scanned_ids, used_seats = set(), set()
 try:
     vals = LOG_WS.get_all_values()
     for r in vals[2:]:
-        if not r: continue
+        if not r:
+            continue
         sid = (r[0].strip() if len(r) > 0 and r[0] else "")
         seat = (r[2].strip() if len(r) > 2 and r[2] else "")
-        if sid: scanned_ids.add(sid)
-        if seat: used_seats.add(normalize_seat(seat))
+        if sid:
+            scanned_ids.add(sid)
+        if seat:
+            used_seats.add(normalize_seat(seat))
 except Exception:
     pass
 
 st.caption(f"Roster: **{roster_sheet}**  |  Write-back: **{LOG_WS_NAME}**")
-st.link_button("Open Google Sheet", f"https://docs.google.com/spreadsheets/d/{SHEET_ID}")
+try:
+    st.link_button("Open Google Sheet", f"https://docs.google.com/spreadsheets/d/{SHEET_ID}")
+except Exception:
+    st.markdown(f"[Open Google Sheet](https://docs.google.com/spreadsheets/d/{SHEET_ID})")
 
 # ------------------ Camera Scanner ------------------
 st.subheader("Scan with phone camera (1D & QR)")
-if not HAS_CV2 or not HAS_WEBRTC:
+if not HAS_WEBRTC or not HAS_CV2:
     st.warning(
-        "Camera scanning disabled: missing cv2 or streamlit-webrtc.\n"
-        "• ใช้งานได้ด้วยการกรอก Student ID / Seat ด้านล่างตามปกติ\n"
-        "• แก้ให้ใช้กล้อง: เพิ่มแพ็กเกจ `opencv-python-headless` (หรือ `opencv-contrib-python-headless` "
-        "ถ้าต้องการ 1D barcode) ใน `requirements.txt` แล้ว Deploy ใหม่"
+        "Camera scanning disabled: missing dependency.\n\n"
+        "• ยังใช้งานได้ด้วยการกรอก Student ID / Seat ด้านล่างตามปกติ\n"
+        "• เปิดใช้กล้องให้ติดตั้ง:\n"
+        "  - streamlit-webrtc\n"
+        "  - opencv-contrib-python-headless (รองรับ 1D/2D) หรือ opencv-python-headless (QR เท่านั้น)"
     )
 else:
     if "student_id_prefill" not in st.session_state:
@@ -195,17 +245,20 @@ else:
     auto_submit = st.checkbox("Auto submit when a valid Student ID is detected", value=False)
 
     def decode_any_barcode(img_bgr) -> str:
-        # 1) BarcodeDetector (1D+2D)
+        # 1) BarcodeDetector (1D+2D) ถ้ามี
         try:
-            bd = cv2.barcode_BarcodeDetector()
-            ok, infos, types, corners = bd.detectAndDecode(img_bgr)
-            if ok and infos:
-                return (infos[0] or "").strip()
+            bd = getattr(cv2, "barcode_BarcodeDetector", None)
+            if bd is not None:
+                bd = bd()
+                ok, infos, types, corners = bd.detectAndDecode(img_bgr)
+                if ok and infos:
+                    return (infos[0] or "").strip()
         except Exception:
             pass
-        # 2) Fallback to QR only
+        # 2) Fallback: QR เท่านั้น
         try:
-            data, _, _ = cv2.QRCodeDetector().detectAndDecode(img_bgr)
+            qrd = cv2.QRCodeDetector()
+            data, _, _ = qrd.detectAndDecode(img_bgr)
             return (data or "").strip()
         except Exception:
             return ""
@@ -261,11 +314,12 @@ def save_row(sid: str, full_name: str, seat: str):
         msg.error(f"Cannot write to Google Sheets log: {e}")
         return
     scanned_ids.add(sid)
-    if seat: used_seats.add(seat)
+    if seat:
+        used_seats.add(normalize_seat(seat))
     msg.success(f"✅ {sid} ({full_name}) • Seat: {seat or '-'} • {time_str} ({status})")
 
 if submitted:
-    # switch session/sheets if crossed noon/day
+    # ตรวจว่าข้ามช่วง/ข้ามวันหรือยัง
     now2 = datetime.now()
     new_session_th, new_cutoff = get_session_th_and_cutoff(now2.time())
     new_session_en = "Morning" if new_session_th == "เช้า" else "Afternoon"
@@ -275,26 +329,27 @@ if submitted:
         try:
             ROSTER_BY_ID, ROSTER_BY_SEAT = load_roster_id_and_seat_from_gsheet(SHEET_ID, new_roster_sheet)
         except Exception as e:
-            st.error(f"Failed to switch roster '{new_roster_sheet}': {e}")
+            st.error(f"สลับ roster '{new_roster_sheet}' ไม่สำเร็จ: {e}")
             st.stop()
         try:
-            new_name = f"Log {now2.strftime('%Y-%m-%d')} {new_session_en}"
-            LOG_WS_NAME = new_name
+            LOG_WS_NAME = f"Log {now2.strftime('%Y-%m-%d')} {new_session_en}"
             LOG_WS = open_or_create_log_worksheet(SH, LOG_WS_NAME)
+            # อัปเดต state ปัจจุบัน
             cutoff_time = new_cutoff
             session_en = new_session_en
             roster_sheet = new_roster_sheet
             scanned_ids.clear(); used_seats.clear()
             vals2 = LOG_WS.get_all_values()
             for r in vals2[2:]:
-                if not r: continue
+                if not r: 
+                    continue
                 sid = (r[0].strip() if len(r) > 0 and r[0] else "")
                 seat = (r[2].strip() if len(r) > 2 and r[2] else "")
                 if sid: scanned_ids.add(sid)
                 if seat: used_seats.add(normalize_seat(seat))
             st.rerun()
         except Exception as e:
-            st.error(f"Cannot open/create log sheet: {e}")
+            st.error(f"เปิด/สร้าง log sheet ไม่สำเร็จ: {e}")
             st.stop()
 
     sid = extract_student_id(sid_in) if sid_in else None
