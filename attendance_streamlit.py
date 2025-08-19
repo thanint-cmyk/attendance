@@ -3,7 +3,37 @@
 import os, re
 from datetime import datetime, time
 
+import sys, platform
+st.caption(f"Python: {sys.version.split()[0]} • {platform.platform()}")
+
 import streamlit as st
+
+def _ensure_gspread():
+    try:
+        import gspread  # noqa
+        from google.oauth2.service_account import Credentials  # noqa
+        return True
+    except ImportError:
+        return False
+
+if not _ensure_gspread():
+    import sys, subprocess
+    st.warning("Installing Google Sheets deps (gspread / google-auth) ...")
+    try:
+        # ติดตั้งแบบระบุเวอร์ชันที่ใช้ได้ชัวร์
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install",
+             "gspread==6.1.2", "google-auth==2.33.0",
+             "--disable-pip-version-check"]
+        )
+    except Exception as e:
+        st.error(f"Install deps failed: {type(e).__name__}: {e}")
+        st.stop()
+
+# import จริง (หลังจาก self-install ถ้าจำเป็น)
+import gspread
+from google.oauth2.service_account import Credentials
+st.caption(f"gspread={getattr(gspread, '__version__', 'unknown')} • google-auth OK")
 
 # ---------- Optional Webcam via WebRTC ----------
 try:
