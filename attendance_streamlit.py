@@ -23,24 +23,35 @@ except Exception:
     cv2 = None
 
 # ---------- Google Sheets (must-have for logging) ----------
-try:
-    import gspread
-    from google.oauth2.service_account import Credentials
-    HAS_GSPREAD = True
-    # Debug เวอร์ชัน (ถ้าอยากเห็นว่ามีจริง)
-    st.caption(f"gspread={getattr(gspread, '__version__', 'unknown')} • google-auth OK")
-except ImportError as e:
-    HAS_GSPREAD = False
-    gspread = None
-    Credentials = None
-    st.error(f"[ImportError] {e}")  # ขาดแพ็กเกจจริง ๆ
-    st.stop()
-except Exception as e:
-    HAS_GSPREAD = False
-    gspread = None
-    Credentials = None
-    st.exception(e)  # แสดงสาเหตุจริง (เช่น bug, incompatibility)
-    st.stop()
+ try:
+     import gspread
+     from google.oauth2.service_account import Credentials
+     HAS_GSPREAD = True
+     # Debug เวอร์ชัน (ถ้าอยากเห็นว่ามีจริง)
+     st.caption(f"gspread={getattr(gspread, '__version__', 'unknown')} • google-auth OK")
+ except ImportError as e:
+     HAS_GSPREAD = False
+     gspread = None
+     Credentials = None
+-    st.error(f"[ImportError] {e}")  # ขาดแพ็กเกจจริง ๆ
++    # FIX: แสดงข้อมูลสภาพแวดล้อมเพื่อหาสาเหตุว่าทำไม import ไม่ได้
++    import sys, pkgutil, platform
++    installed = sorted({m.name for m in pkgutil.iter_modules() if m.name.startswith(("gspread","google"))})
++    st.error(f"[ImportError] {e}")
++    st.write({
++        "python": sys.version,
++        "executable": sys.executable,
++        "platform": platform.platform(),
++        "found-modules-prefix-gspread/google": installed,
++        "sys.path[0:3]": sys.path[:3],
++    })
+     st.stop()
+ except Exception as e:
+     HAS_GSPREAD = False
+     gspread = None
+     Credentials = None
+     st.exception(e)  # แสดงสาเหตุจริง (เช่น bug, incompatibility)
+     st.stop()
 
 # ---------- Streamlit Page Config (call early) ----------
 st.set_page_config(page_title="QR/Barcode Attendance", page_icon="✅")
