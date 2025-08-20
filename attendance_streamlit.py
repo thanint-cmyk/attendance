@@ -18,17 +18,42 @@ def _ensure_gspread():
         return False
 
 if not _ensure_gspread():
-    import sys, subprocess
+    import sys, subprocess, site, importlib
     st.warning("Installing Google Sheets deps (gspread / google-auth) ...")
+
+    def _try(cmd):
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        tail = (res.stderr or "")[-4000:]
+        return (res.returncode == 0), tail
+
+    # แผน A: เวอร์ชันที่ปักหมุด
+    ok, tail = _try([sys.executable, "-m", "pip", "install",
+                     "gspread==6.1.2", "google-auth==2.33.0",
+                     "--disable-pip-version-check"])
+    if not ok:
+        # แผน B: ล่าสุด + --user
+        ok, tail = _try([sys.executable, "-m", "pip", "install",
+                         "gspread", "google-auth",
+                         "--no-cache-dir", "--user",
+                         "--disable-pip-version-check"])
+        try:
+            user_site = site.getusersitepackages() if hasattr(site, "getusersitepackages") else []
+            user_site = user_site if isinstance(user_site, (list, tuple)) else [user_site]
+            for p in [site.USER_SITE, *user_site]:
+                if p and p not in sys.path:
+                    sys.path.append(p)
+        except Exception:
+            pass
+
+    if not ok:
+        st.error("Install deps failed (both pinned & user latest). stderr tail:\n" + tail)
+        st.stop()
+
     try:
-        # ติดตั้งแบบระบุเวอร์ชันที่ใช้ได้ชัวร์
-        subprocess.check_call(
-            [sys.executable, "-m", "pip", "install",
-             "gspread==6.1.2", "google-auth==2.33.0",
-             "--disable-pip-version-check"]
-        )
+        gspread = importlib.import_module("gspread")
+        from google.oauth2.service_account import Credentials
     except Exception as e:
-        st.error(f"Install deps failed: {type(e).__name__}: {e}")
+        st.error(f"Installed but cannot import: {type(e).__name__}: {e}")
         st.stop()
 
 # import จริง (หลังจาก self-install ถ้าจำเป็น)
