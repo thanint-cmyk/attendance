@@ -3,10 +3,11 @@
 import os, re
 from datetime import datetime, time
 
+import streamlit as st
+st.set_page_config(page_title="QR/Barcode Attendance", page_icon="✅")  # ต้องมาก่อนคำสั่ง st อื่นๆ
+
 import sys, platform
 st.caption(f"Python: {sys.version.split()[0]} • {platform.platform()}")
-
-import streamlit as st
 
 def _ensure_gspread():
     try:
@@ -33,6 +34,7 @@ if not _ensure_gspread():
 # import จริง (หลังจาก self-install ถ้าจำเป็น)
 import gspread
 from google.oauth2.service_account import Credentials
+HAS_GSPREAD = True
 st.caption(f"gspread={getattr(gspread, '__version__', 'unknown')} • google-auth OK")
 
 # ---------- Optional Webcam via WebRTC ----------
@@ -51,61 +53,6 @@ try:
 except Exception:
     HAS_CV2 = False
     cv2 = None
-
-# ---------- Google Sheets (must-have for logging) ----------
-# ---------- Google Sheets deps (self-heal) ----------
-def _ensure_gspread():
-    try:
-        import gspread  # noqa
-        from google.oauth2.service_account import Credentials  # noqa
-        return True
-    except ImportError:
-        return False
-
-if not _ensure_gspread():
-    import sys, subprocess
-    st.warning("Installing Google Sheets deps (gspread / google-auth) ...")
-    try:
-        subprocess.check_call(
-            [sys.executable, "-m", "pip", "install",
-             "gspread==6.1.2", "google-auth==2.33.0",
-             "--disable-pip-version-check"]
-        )
-    except Exception as e:
-        st.error(f"Install deps failed: {type(e).__name__}: {e}")
-        st.stop()
-
-# import จริง (หลังจาก self-install ถ้าจำเป็น)
-import gspread
-from google.oauth2.service_account import Credentials
-st.caption(f"gspread={getattr(gspread, '__version__', 'unknown')} • google-auth OK")
-
- except ImportError as e:
-     HAS_GSPREAD = False
-     gspread = None
-     Credentials = None
--    st.error(f"[ImportError] {e}")  # ขาดแพ็กเกจจริง ๆ
-+    # FIX: แสดงข้อมูลสภาพแวดล้อมเพื่อหาสาเหตุว่าทำไม import ไม่ได้
-+    import sys, pkgutil, platform
-+    installed = sorted({m.name for m in pkgutil.iter_modules() if m.name.startswith(("gspread","google"))})
-+    st.error(f"[ImportError] {e}")
-+    st.write({
-+        "python": sys.version,
-+        "executable": sys.executable,
-+        "platform": platform.platform(),
-+        "found-modules-prefix-gspread/google": installed,
-+        "sys.path[0:3]": sys.path[:3],
-+    })
-     st.stop()
- except Exception as e:
-     HAS_GSPREAD = False
-     gspread = None
-     Credentials = None
-     st.exception(e)  # แสดงสาเหตุจริง (เช่น bug, incompatibility)
-     st.stop()
-
-# ---------- Streamlit Page Config (call early) ----------
-st.set_page_config(page_title="QR/Barcode Attendance", page_icon="✅")
 
 # ------------------ Login ------------------
 def login_gate():
