@@ -53,12 +53,33 @@ except Exception:
     cv2 = None
 
 # ---------- Google Sheets (must-have for logging) ----------
- try:
-     import gspread
-     from google.oauth2.service_account import Credentials
-     HAS_GSPREAD = True
-     # Debug เวอร์ชัน (ถ้าอยากเห็นว่ามีจริง)
-     st.caption(f"gspread={getattr(gspread, '__version__', 'unknown')} • google-auth OK")
+# ---------- Google Sheets deps (self-heal) ----------
+def _ensure_gspread():
+    try:
+        import gspread  # noqa
+        from google.oauth2.service_account import Credentials  # noqa
+        return True
+    except ImportError:
+        return False
+
+if not _ensure_gspread():
+    import sys, subprocess
+    st.warning("Installing Google Sheets deps (gspread / google-auth) ...")
+    try:
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install",
+             "gspread==6.1.2", "google-auth==2.33.0",
+             "--disable-pip-version-check"]
+        )
+    except Exception as e:
+        st.error(f"Install deps failed: {type(e).__name__}: {e}")
+        st.stop()
+
+# import จริง (หลังจาก self-install ถ้าจำเป็น)
+import gspread
+from google.oauth2.service_account import Credentials
+st.caption(f"gspread={getattr(gspread, '__version__', 'unknown')} • google-auth OK")
+
  except ImportError as e:
      HAS_GSPREAD = False
      gspread = None
